@@ -8,6 +8,8 @@ from torch.utils.data import DataLoader, random_split
 from torch.optim import AdamW
 from torch.optim.lr_scheduler import CosineAnnealingLR
 
+import wandb
+
 from dataset import AIGCDataset, build_transforms
 from models.model import create_model
 from utils import set_seed, ensure_dir, accuracy, save_checkpoint
@@ -82,7 +84,12 @@ def parse_args():
         type=str,
         default="rgb_fft_grad",
         choices=["rgb", "rgb_fft", "rgb_grad", "rgb_fft_grad"],
-        help="Which channels to use for ablation",
+        help="Channels for ablation: rgb / rgb_fft / rgb_grad / rgb_fft_grad",
+    )
+    parser.add_argument(
+        "--use_wandb",
+        action="store_true",
+        help="Log training to Weights and Biases",
     )
     return parser.parse_args()
 
@@ -148,6 +155,18 @@ def evaluate(
     return epoch_loss, epoch_acc
 
 
+def resolve_channel_mode(mode: str):
+    """Return (use_extra, use_fft, use_grad, in_channels) for given mode."""
+    if mode == "rgb":
+        return False, False, False, 3
+    if mode == "rgb_fft":
+        return True, True, False, 4
+    if mode == "rgb_grad":
+        return True, False, True, 5
+    # rgb_fft_grad
+    return True, True, True, 6
+
+
 def main():
     args = parse_args()
     set_seed(args.seed)
@@ -156,35 +175,19 @@ def main():
     log_path = os.path.join(args.save_dir, "train.log")
     train_root = os.path.join(args.data_dir, "train")
 
-    if args.channel_mode == "rgb":
-        use_extra_channels = False
-        use_fft = False
-        use_grad = False
-        in_channels = 3
-    elif args.channel_mode == "rgb_fft":
-        use_extra_channels = True
-        use_fft = True
-        use_grad = False
-        in_channels = 4
-    elif args.channel_mode == "rgb_grad":
-        use_extra_channels = True
-        use_fft = False
-        use_grad = True
-        in_channels = 5
-    else:  # "rgb_fft_grad"
-        use_extra_channels = True
-        use_fft = True
-        use_grad = True
-        in_channels = 6
-
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     train_transform, eval_transform = build_transforms(img_size=args.img_size)
 
-    full_dataset = AIGCDataset(
+    use_extra, use_fft, use_grad, in_channels = resolve_channel_mode(
+        args.channel_mode
+    )
+
+    # dataset with train/val split
+    full_dataset = AIGCDDataset(
         root=train_root,
         transform=train_transform,
-        use_extra_channels=use_extra_channels,
+        use_extra_channels=use_extra,
         use_fft=use_fft,
         use_grad=use_grad,
     )
@@ -198,7 +201,7 @@ def main():
         generator=torch.Generator().manual_seed(args.seed),
     )
 
-    # 验证集要用 eval_transform 和相同的 handcrafted 通道
+    # validation uses eval transform but same handcrafted flags
     val_dataset.dataset.transform = eval_transform
 
     train_loader = DataLoader(
@@ -227,6 +230,18 @@ def main():
         weight_decay=args.weight_decay,
     )
     scheduler = CosineAnnealingLR(optimizer, T_max=args.epochs)
+
+    # wandb init
+    run = None
+    if args.use_wandb:
+        project = os.getenv("WANDB_PROJECT", "aigc-det")
+        entity = os.getenv("WANDB_ENTITY", None)
+        run = wandb.init(
+            project=project,
+            entity=entity,
+            config=vars(args),
+        )
+        wandb.watch(model, log="gradients", log_freq=100)
 
     best_val_acc = 0.0
     best_epoch = 0
@@ -274,6 +289,19 @@ def main():
             f_log.write(log_line)
             f_log.flush()
 
+            if args.use_wandb:
+                wandb.log(
+                    {
+                        "epoch": epoch,
+                        "train/loss": train_loss,
+                        "train/acc": train_acc,
+                        "val/loss": val_loss,
+                        "val/acc": val_acc,
+                        "lr": lr_now,
+                        "time/epoch_sec": elapsed,
+                    }
+                )
+
             if val_acc > best_val_acc:
                 best_val_acc = val_acc
                 best_epoch = epoch
@@ -291,6 +319,9 @@ def main():
             f"Training finished. Best val acc {best_val_acc:.4f} at epoch {best_epoch}"
         )
         print(f"Best model saved to {best_model_path}")
+
+    if run is not None:
+        run.finish()
 
 
 if __name__ == "__main__":
