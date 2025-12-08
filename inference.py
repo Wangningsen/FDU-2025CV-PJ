@@ -49,6 +49,13 @@ def parse_args():
         default=256,
         help="Input image size (HxW)",
     )
+    parser.add_argument(
+        "--channel_mode",
+        type=str,
+        default="rgb_fft_grad",
+        choices=["rgb", "rgb_fft", "rgb_grad", "rgb_fft_grad"],
+        help="Which channels to use, must match training",
+    )
     return parser.parse_args()
 
 
@@ -93,8 +100,36 @@ def main():
         num_workers=args.num_workers,
         pin_memory=True,
     )
+    if args.channel_mode == "rgb":
+        use_extra_channels = False
+        use_fft = False
+        use_grad = False
+        in_channels = 3
+    elif args.channel_mode == "rgb_fft":
+        use_extra_channels = True
+        use_fft = True
+        use_grad = False
+        in_channels = 4
+    elif args.channel_mode == "rgb_grad":
+        use_extra_channels = True
+        use_fft = False
+        use_grad = True
+        in_channels = 5
+    else:
+        use_extra_channels = True
+        use_fft = True
+        use_grad = True
+        in_channels = 6
 
-    model = create_model(in_channels=6, num_classes=2)
+    test_dataset = AIGCTestDataset(
+        root=test_root,
+        transform=eval_transform,
+        use_extra_channels=use_extra_channels,
+        use_fft=use_fft,
+        use_grad=use_grad,
+    )
+
+    model = create_model(in_channels=in_channels, num_classes=2)
     checkpoint = torch.load(args.checkpoint, map_location=device)
     model.load_state_dict(checkpoint["model_state"])
     model.to(device)

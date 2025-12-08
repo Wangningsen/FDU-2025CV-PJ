@@ -77,6 +77,13 @@ def parse_args():
         default=256,
         help="Input image size (HxW)",
     )
+    parser.add_argument(
+        "--channel_mode",
+        type=str,
+        default="rgb_fft_grad",
+        choices=["rgb", "rgb_fft", "rgb_grad", "rgb_fft_grad"],
+        help="Which channels to use for ablation",
+    )
     return parser.parse_args()
 
 
@@ -149,6 +156,27 @@ def main():
     log_path = os.path.join(args.save_dir, "train.log")
     train_root = os.path.join(args.data_dir, "train")
 
+    if args.channel_mode == "rgb":
+        use_extra_channels = False
+        use_fft = False
+        use_grad = False
+        in_channels = 3
+    elif args.channel_mode == "rgb_fft":
+        use_extra_channels = True
+        use_fft = True
+        use_grad = False
+        in_channels = 4
+    elif args.channel_mode == "rgb_grad":
+        use_extra_channels = True
+        use_fft = False
+        use_grad = True
+        in_channels = 5
+    else:  # "rgb_fft_grad"
+        use_extra_channels = True
+        use_fft = True
+        use_grad = True
+        in_channels = 6
+
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     train_transform, eval_transform = build_transforms(img_size=args.img_size)
@@ -156,7 +184,9 @@ def main():
     full_dataset = AIGCDataset(
         root=train_root,
         transform=train_transform,
-        use_extra_channels=True,
+        use_extra_channels=use_extra_channels,
+        use_fft=use_fft,
+        use_grad=use_grad,
     )
 
     val_size = int(len(full_dataset) * args.val_ratio)
@@ -187,7 +217,7 @@ def main():
         pin_memory=True,
     )
 
-    model = create_model(in_channels=6, num_classes=2)
+    model = create_model(in_channels=in_channels, num_classes=2)
     model.to(device)
 
     criterion = nn.CrossEntropyLoss()

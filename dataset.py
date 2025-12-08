@@ -15,10 +15,19 @@ def is_image_file(filename: str) -> bool:
     return filename.lower().endswith(IMG_EXTENSIONS)
 
 
-def compute_handcrafted_channels(x: torch.Tensor) -> torch.Tensor:
+# dataset.py
+
+def compute_handcrafted_channels(
+    x: torch.Tensor,
+    use_fft: bool = True,
+    use_grad: bool = True,
+) -> torch.Tensor:
     """
-    输入: x, 形状为 (3, H, W), 取值在 [0, 1]
-    输出: 拼接 FFT 幅度图 + Sobel Gx + Sobel Gy, 共 6 通道
+    输入: x, (3, H, W), [0,1]
+    输出: 按配置拼接额外通道:
+      - RGB 必有
+      - use_fft: 加 1 个 FFT 幅度通道
+      - use_grad: 加 2 个梯度通道 Gx, Gy
     """
     assert x.ndim == 3 and x.shape[0] == 3
 
@@ -26,36 +35,38 @@ def compute_handcrafted_channels(x: torch.Tensor) -> torch.Tensor:
     gray = 0.299 * r + 0.587 * g + 0.114 * b  # (H, W)
     gray = gray.unsqueeze(0)  # (1, H, W)
 
-    # Sobel 梯度
-    sobel_x = torch.tensor(
-        [[1, 0, -1], [2, 0, -2], [1, 0, -1]],
-        dtype=torch.float32,
-    ).view(1, 1, 3, 3)
-    sobel_y = torch.tensor(
-        [[1, 2, 1], [0, 0, 0], [-1, -2, -1]],
-        dtype=torch.float32,
-    ).view(1, 1, 3, 3)
+    channels = [x]  # 先放 RGB
 
-    gray_nchw = gray.unsqueeze(0)  # (1, 1, H, W)
+    if use_fft:
+        fft = torch.fft.fft2(gray)
+        fft_shift = torch.fft.fftshift(fft)
+        mag = torch.abs(fft_shift)
+        mag = torch.log1p(mag)
+        mag = mag - mag.min()
+        if mag.max() > 0:
+            mag = mag / mag.max()
+        channels.append(mag)  # (1, H, W)
 
-    gx = F.conv2d(gray_nchw, sobel_x, padding=1)
-    gy = F.conv2d(gray_nchw, sobel_y, padding=1)
-    gx = gx.squeeze(0)  # (1, H, W)
-    gy = gy.squeeze(0)  # (1, H, W)
+    if use_grad:
+        sobel_x = torch.tensor(
+            [[1, 0, -1], [2, 0, -2], [1, 0, -1]],
+            dtype=torch.float32,
+        ).view(1, 1, 3, 3)
+        sobel_y = torch.tensor(
+            [[1, 2, 1], [0, 0, 0], [-1, -2, -1]],
+            dtype=torch.float32,
+        ).view(1, 1, 3, 3)
 
-    # FFT 幅度
-    fft = torch.fft.fft2(gray)
-    fft_shift = torch.fft.fftshift(fft)
-    mag = torch.abs(fft_shift)
-    mag = torch.log1p(mag)  # 压缩动态范围
+        gray_nchw = gray.unsqueeze(0)  # (1, 1, H, W)
+        gx = F.conv2d(gray_nchw, sobel_x, padding=1).squeeze(0)  # (1, H, W)
+        gy = F.conv2d(gray_nchw, sobel_y, padding=1).squeeze(0)  # (1, H, W)
 
-    mag = mag - mag.min()
-    if mag.max() > 0:
-        mag = mag / mag.max()
+        channels.append(gx)
+        channels.append(gy)
 
-    # 拼接: 3 + 1 + 1 + 1 = 6 通道
-    out = torch.cat([x, mag, gx, gy], dim=0)
+    out = torch.cat(channels, dim=0)
     return out
+
 
 
 class AIGCDataset(Dataset):
@@ -73,11 +84,15 @@ class AIGCDataset(Dataset):
         root: str,
         transform=None,
         use_extra_channels: bool = True,
+        use_fft: bool = True,
+        use_grad: bool = True,
     ):
         super().__init__()
         self.root = root
         self.transform = transform
         self.use_extra_channels = use_extra_channels
+        self.use_fft = use_fft
+        self.use_grad = use_grad
 
         self.samples: List[Tuple[str, int]] = []
         for sub in ["0_real", "1_fake"]:
@@ -103,11 +118,14 @@ class AIGCDataset(Dataset):
         img = Image.open(path).convert("RGB")
 
         if self.transform is not None:
-            img = self.transform(img)  # Tensor (3, H, W)
+            img = self.transform(img)  # (3, H, W)
 
         if self.use_extra_channels:
-            img = compute_handcrafted_channels(img)  # (6, H, W)
-
+            img = compute_handcrafted_channels(
+                img,
+                use_fft=self.use_fft,
+                use_grad=self.use_grad,
+            )
         return img, label
 
 
@@ -122,11 +140,15 @@ class AIGCTestDataset(Dataset):
         root: str,
         transform=None,
         use_extra_channels: bool = True,
+        use_fft: bool = True,
+        use_grad: bool = True,
     ):
         super().__init__()
         self.root = root
         self.transform = transform
         self.use_extra_channels = use_extra_channels
+        self.use_fft = use_fft
+        self.use_grad = use_grad
 
         files = [
             f
@@ -151,10 +173,13 @@ class AIGCTestDataset(Dataset):
             img = self.transform(img)
 
         if self.use_extra_channels:
-            img = compute_handcrafted_channels(img)
+            img = compute_handcrafted_channels(
+                img,
+                use_fft=self.use_fft,
+                use_grad=self.use_grad,
+            )
 
-        image_id = fname
-        return img, image_id
+        return img, fname
 
 
 def build_transforms(img_size: int = 256):
