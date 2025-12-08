@@ -1,0 +1,45 @@
+# Python 编译中间文件
+__pycache__/
+*.py[cod]
+*.pyo
+
+# 虚拟环境
+venv/
+.env/
+.venv/
+env/
+
+# IDE & 系统文件
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# 日志和缓存
+*.log
+*.out
+*.err
+*.tmp
+*.swp
+*.swo
+.pytest_cache/
+.mypy_cache/
+
+# 训练产生的权重和中间结果
+weights/
+checkpoints/
+*.pth
+*.pt
+*.ckpt
+
+# 结果文件
+result.csv
+submission.csv
+
+# 数据集本身
+dataset/
+!dataset/.gitkeep  # 如果你想保留空目录结构可以加一个 .gitkeep
+
+# Jupyter 相关
+.ipynb_checkpoints/
+*.ipynb
