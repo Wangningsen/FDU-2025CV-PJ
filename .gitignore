@@ -3,6 +3,8 @@ __pycache__/
 *.py[cod]
 *.pyo
 
+wandb/
+
 # 虚拟环境
 venv/
 .env/
