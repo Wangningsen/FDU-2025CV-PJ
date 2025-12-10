@@ -1,0 +1,98 @@
+{
+  "os": "Linux-6.8.0-51-generic-x86_64-with-glibc2.39",
+  "python": "CPython 3.10.18",
+  "startedAt": "2025-12-10T11:10:25.102672Z",
+  "args": [
+    "--data_dir",
+    "/data1/nwang60/datasets/CV-Dataset",
+    "--save_dir",
+    "./weights/rgb_only_exp1",
+    "--channel_mode",
+    "rgb",
+    "--use_wandb"
+  ],
+  "program": "/home/nwang60/FDU-2025CV-PJ/train.py",
+  "codePath": "train.py",
+  "codePathLocal": "train.py",
+  "git": {
+    "remote": "https://github.com/Wangningsen/FDU-2025CV-PJ.git",
+    "commit": "1ad0a035a40947d665e5d48f725d8c062d16b731"
+  },
+  "email": "ningsenw@gmail.com",
+  "root": "/home/nwang60/FDU-2025CV-PJ",
+  "host": "vlaa-02",
+  "executable": "/data1/nwang60/miniconda3/envs/medvlthinker/bin/python",
+  "cpu_count": 64,
+  "cpu_count_logical": 64,
+  "gpu": "NVIDIA RTX A5000",
+  "gpu_count": 8,
+  "disk": {
+    "/": {
+      "total": "1889085706240",
+      "used": "1636774211584"
+    }
+  },
+  "memory": {
+    "total": "270298218496"
+  },
+  "gpu_nvidia": [
+    {
+      "name": "NVIDIA RTX A5000",
+      "memoryTotal": "25757220864",
+      "cudaCores": 8192,
+      "architecture": "Ampere",
+      "uuid": "GPU-9afe49f0-6bc1-8576-d81f-1fa61b835935"
+    },
+    {
+      "name": "NVIDIA RTX A5000",
+      "memoryTotal": "25757220864",
+      "cudaCores": 8192,
+      "architecture": "Ampere",
+      "uuid": "GPU-8045de2b-c2cf-bd96-a792-987afda82ec7"
+    },
+    {
+      "name": "NVIDIA RTX A5000",
+      "memoryTotal": "25757220864",
+      "cudaCores": 8192,
+      "architecture": "Ampere",
+      "uuid": "GPU-cc23d5b7-b47e-cff1-1bdf-447a1c64d092"
+    },
+    {
+      "name": "NVIDIA RTX A5000",
+      "memoryTotal": "25757220864",
+      "cudaCores": 8192,
+      "architecture": "Ampere",
+      "uuid": "GPU-89b7fd75-9072-fe43-0c58-94d4081e74e0"
+    },
+    {
+      "name": "NVIDIA RTX A5000",
+      "memoryTotal": "25757220864",
+      "cudaCores": 8192,
+      "architecture": "Ampere",
+      "uuid": "GPU-1a2cdf14-33b6-6812-6b1a-a6a1682caeae"
+    },
+    {
+      "name": "NVIDIA RTX A5000",
+      "memoryTotal": "25757220864",
+      "cudaCores": 8192,
+      "architecture": "Ampere",
+      "uuid": "GPU-05c132eb-f9d9-7e9d-b7cf-3cb0e2c35588"
+    },
+    {
+      "name": "NVIDIA RTX A5000",
+      "memoryTotal": "25757220864",
+      "cudaCores": 8192,
+      "architecture": "Ampere",
+      "uuid": "GPU-2ededd68-fe3c-e0be-1aa4-65362d4a8616"
+    },
+    {
+      "name": "NVIDIA RTX A5000",
+      "memoryTotal": "25757220864",
+      "cudaCores": 8192,
+      "architecture": "Ampere",
+      "uuid": "GPU-58f79b25-4e45-3592-fe7d-a5b3bfd1465e"
+    }
+  ],
+  "cudaVersion": "12.6",
+  "writerId": "d6iu2i2zo2tjb6ta1ir3uulukllfwdko"
+}

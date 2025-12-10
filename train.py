@@ -184,7 +184,7 @@ def main():
     )
 
     # dataset with train/val split
-    full_dataset = AIGCDDataset(
+    full_dataset = AIGCDataset(
         root=train_root,
         transform=train_transform,
         use_extra_channels=use_extra,
