@@ -1,4 +1,6 @@
+import io
 import os
+import random
 from typing import List, Tuple
 
 from PIL import Image
@@ -87,6 +89,25 @@ def compute_handcrafted_channels(
     return out
 
 
+def random_jpeg_compress(img: Image.Image, quality_range=(30, 80)):
+    q = random.randint(quality_range[0], quality_range[1])
+    buffer = io.BytesIO()
+    img.save(buffer, format="JPEG", quality=q)
+    buffer.seek(0)
+    return Image.open(buffer).convert("RGB")
+
+
+class RandomJPEGCompression(object):
+    def __init__(self, quality_range=(30, 80), p=0.5):
+        self.quality_range = quality_range
+        self.p = p
+
+    def __call__(self, img):
+        if random.random() < self.p:
+            return random_jpeg_compress(img, self.quality_range)
+        return img
+
+
 
 class AIGCDataset(Dataset):
     """
@@ -102,6 +123,7 @@ class AIGCDataset(Dataset):
         self,
         root: str,
         transform=None,
+        use_strong_aug: bool = False,
         use_extra_channels: bool = True,
         use_fft: bool = True,
         use_grad: bool = True,
@@ -111,6 +133,7 @@ class AIGCDataset(Dataset):
         super().__init__()
         self.root = root
         self.transform = transform
+        self.use_strong_aug = use_strong_aug
         self.use_extra_channels = use_extra_channels
         self.use_fft = use_fft
         self.use_grad = use_grad
@@ -132,6 +155,10 @@ class AIGCDataset(Dataset):
 
         if len(self.samples) == 0:
             raise RuntimeError(f"No images found in {root}")
+
+        if self.transform is None:
+            train_transform, _ = build_transforms(use_strong_aug=use_strong_aug)
+            self.transform = train_transform
 
     def __len__(self) -> int:
         return len(self.samples)
@@ -164,6 +191,7 @@ class AIGCTestDataset(Dataset):
         self,
         root: str,
         transform=None,
+        use_strong_aug: bool = False,
         use_extra_channels: bool = True,
         use_fft: bool = True,
         use_grad: bool = True,
@@ -173,6 +201,7 @@ class AIGCTestDataset(Dataset):
         super().__init__()
         self.root = root
         self.transform = transform
+        self.use_strong_aug = use_strong_aug
         self.use_extra_channels = use_extra_channels
         self.use_fft = use_fft
         self.use_grad = use_grad
@@ -189,6 +218,10 @@ class AIGCTestDataset(Dataset):
 
         if len(self.files) == 0:
             raise RuntimeError(f"No images found in test dir {root}")
+
+        if self.transform is None:
+            _, eval_transform = build_transforms()
+            self.transform = eval_transform
 
     def __len__(self) -> int:
         return len(self.files)
@@ -213,20 +246,51 @@ class AIGCTestDataset(Dataset):
         return img, fname
 
 
-def build_transforms(img_size: int = 256):
-    train_transform = transforms.Compose(
+def build_strong_train_transform(img_size=256):
+    return transforms.Compose(
         [
-            transforms.Resize((img_size, img_size)),
+            transforms.RandomResizedCrop(img_size, scale=(0.8, 1.0)),
             transforms.RandomHorizontalFlip(),
             transforms.ColorJitter(
-                brightness=0.1,
-                contrast=0.1,
-                saturation=0.1,
-                hue=0.05,
+                brightness=0.2,
+                contrast=0.2,
+                saturation=0.2,
+                hue=0.1,
+            ),
+            transforms.RandomApply(
+                [transforms.GaussianBlur(kernel_size=3)],
+                p=0.3,
+            ),
+            transforms.RandomApply(
+                [RandomJPEGCompression(quality_range=(30, 80))],
+                p=0.5,
+            ),
+            transforms.RandomApply(
+                [transforms.RandomGrayscale(p=1.0)],
+                p=0.2,
             ),
             transforms.ToTensor(),
         ]
     )
+
+
+def build_transforms(img_size=256, use_strong_aug=False):
+    if use_strong_aug:
+        train_transform = build_strong_train_transform(img_size=img_size)
+    else:
+        train_transform = transforms.Compose(
+            [
+                transforms.Resize((img_size, img_size)),
+                transforms.RandomHorizontalFlip(),
+                transforms.ColorJitter(
+                    brightness=0.1,
+                    contrast=0.1,
+                    saturation=0.1,
+                    hue=0.05,
+                ),
+                transforms.ToTensor(),
+            ]
+        )
 
     eval_transform = transforms.Compose(
         [

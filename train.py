@@ -2,8 +2,10 @@ import argparse
 import os
 import time
 
+import numpy as np
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 from torch.utils.data import DataLoader, random_split
 from torch.optim import AdamW
 from torch.optim.lr_scheduler import CosineAnnealingLR
@@ -11,7 +13,7 @@ from torch.optim.lr_scheduler import CosineAnnealingLR
 import wandb
 
 from dataset import AIGCDataset, build_transforms
-from models.model import create_model
+from models import AIGCNetSmall, AIGCNetLarge, TwoBranchAIGCNet
 from utils import set_seed, ensure_dir, accuracy, save_checkpoint
 
 
@@ -87,6 +89,59 @@ def parse_args():
         help="Channels for ablation: rgb / rgb_fft / rgb_grad / rgb_fft_grad",
     )
     parser.add_argument(
+        "--model_size",
+        type=str,
+        default="small",
+        choices=["small", "large"],
+        help="Backbone size: small (default) or large.",
+    )
+    parser.add_argument(
+        "--two_branch",
+        action="store_true",
+        help="If set, use a two-branch RGB + Sobel model instead of a single-branch model.",
+    )
+    parser.add_argument(
+        "--use_label_smoothing",
+        action="store_true",
+        help="If set, enable label smoothing for classification loss.",
+    )
+    parser.add_argument(
+        "--label_smoothing",
+        type=float,
+        default=0.1,
+        help="Epsilon value for label smoothing (only used if --use_label_smoothing).",
+    )
+    parser.add_argument(
+        "--use_mixup",
+        action="store_true",
+        help="If set, enable Mixup during training.",
+    )
+    parser.add_argument(
+        "--mixup_alpha",
+        type=float,
+        default=0.4,
+        help="Alpha parameter for Mixup Beta distribution.",
+    )
+    parser.add_argument(
+        "--use_strong_aug",
+        action="store_true",
+        help="If set, enable stronger data augmentations (crop, blur, JPEG, grayscale).",
+    )
+    parser.add_argument(
+        "--use_tta",
+        action="store_true",
+        help="If set, enable simple test-time augmentation (horizontal flip).",
+    )
+    parser.add_argument(
+        "--ensemble_from",
+        type=str,
+        default="",
+        help=(
+            "Optional: comma-separated list of checkpoint paths to ensemble at inference. "
+            "If non-empty, load these models and average their logits."
+        ),
+    )
+    parser.add_argument(
         "--use_wandb",
         action="store_true",
         help="Log training to Weights and Biases",
@@ -105,13 +160,76 @@ def parse_args():
     return parser.parse_args()
 
 
-def train_one_epoch(
-    model,
-    loader,
-    criterion,
-    optimizer,
-    device,
-):
+def resolve_channel_mode(mode: str):
+    if mode == "rgb":
+        return False, False, False, 3
+    if mode == "rgb_fft":
+        return True, True, False, 4
+    if mode == "rgb_grad":
+        return True, False, True, 5
+    return True, True, True, 6
+
+
+def smooth_labels(targets, num_classes, smoothing):
+    confidence = 1.0 - smoothing
+    off_value = smoothing / (num_classes - 1)
+    one_hot = torch.full(
+        (targets.size(0), num_classes),
+        off_value,
+        device=targets.device,
+    )
+    one_hot.scatter_(1, targets.unsqueeze(1), confidence)
+    return one_hot
+
+
+def mixup_data(x, y, alpha):
+    if alpha <= 0:
+        return x, y, y, 1.0
+    lam = np.random.beta(alpha, alpha)
+    batch_size = x.size(0)
+    index = torch.randperm(batch_size).to(x.device)
+    mixed_x = lam * x + (1 - lam) * x[index, :]
+    y_a, y_b = y, y[index]
+    return mixed_x, y_a, y_b, lam
+
+
+def tta_predict(model, x):
+    logits1 = model(x)
+    logits2 = model(torch.flip(x, dims=[3]))
+    return (logits1 + logits2) / 2.0
+
+
+def predict_logits(model, x, use_tta):
+    if isinstance(model, (list, tuple)):
+        logits_sum = None
+        for m in model:
+            preds = tta_predict(m, x) if use_tta else m(x)
+            logits_sum = preds if logits_sum is None else logits_sum + preds
+        return logits_sum / float(len(model))
+    return tta_predict(model, x) if use_tta else model(x)
+
+
+def build_model(args, num_classes, input_channels):
+    if args.two_branch:
+        model = TwoBranchAIGCNet(
+            backbone_size=args.model_size,
+            num_classes=num_classes,
+        )
+    else:
+        backbone_cls = AIGCNetSmall if args.model_size == "small" else AIGCNetLarge
+        model = backbone_cls(
+            in_channels=input_channels,
+            num_classes=num_classes,
+        )
+    n_params = sum(p.numel() for p in model.parameters())
+    print(
+        f"Model: {model.__class__.__name__}, size={args.model_size}, "
+        f"two_branch={args.two_branch}, params={n_params / 1e6:.2f}M"
+    )
+    return model
+
+
+def train_one_epoch(model, loader, criterion, optimizer, device, args):
     model.train()
     running_loss = 0.0
     running_acc = 0.0
@@ -122,8 +240,39 @@ def train_one_epoch(
         labels = labels.to(device, non_blocking=True)
 
         optimizer.zero_grad()
-        outputs = model(images)
-        loss = criterion(outputs, labels)
+        if args.use_mixup:
+            inputs, targets_a, targets_b, lam = mixup_data(
+                images, labels, args.mixup_alpha
+            )
+            outputs = model(inputs)
+            if args.use_label_smoothing:
+                num_classes = outputs.size(1)
+                soft_a = smooth_labels(
+                    targets_a, num_classes, args.label_smoothing
+                )
+                soft_b = smooth_labels(
+                    targets_b, num_classes, args.label_smoothing
+                )
+                soft_labels = lam * soft_a + (1 - lam) * soft_b
+                log_probs = F.log_softmax(outputs, dim=1)
+                loss = -(soft_labels * log_probs).sum(dim=1).mean()
+            else:
+                loss = (
+                    lam * criterion(outputs, targets_a)
+                    + (1 - lam) * criterion(outputs, targets_b)
+                )
+        else:
+            outputs = model(images)
+            if args.use_label_smoothing:
+                num_classes = outputs.size(1)
+                soft_labels = smooth_labels(
+                    labels, num_classes, args.label_smoothing
+                )
+                log_probs = F.log_softmax(outputs, dim=1)
+                loss = -(soft_labels * log_probs).sum(dim=1).mean()
+            else:
+                loss = criterion(outputs, labels)
+
         loss.backward()
         optimizer.step()
 
@@ -138,13 +287,13 @@ def train_one_epoch(
 
 
 @torch.no_grad()
-def evaluate(
-    model,
-    loader,
-    criterion,
-    device,
-):
-    model.eval()
+def evaluate(model, loader, criterion, device, args):
+    if isinstance(model, (list, tuple)):
+        for m in model:
+            m.eval()
+    else:
+        model.eval()
+
     running_loss = 0.0
     running_acc = 0.0
     total_samples = 0
@@ -153,8 +302,16 @@ def evaluate(
         images = images.to(device, non_blocking=True)
         labels = labels.to(device, non_blocking=True)
 
-        outputs = model(images)
-        loss = criterion(outputs, labels)
+        outputs = predict_logits(model, images, args.use_tta)
+        if args.use_label_smoothing:
+            num_classes = outputs.size(1)
+            soft_labels = smooth_labels(
+                labels, num_classes, args.label_smoothing
+            )
+            log_probs = F.log_softmax(outputs, dim=1)
+            loss = -(soft_labels * log_probs).sum(dim=1).mean()
+        else:
+            loss = criterion(outputs, labels)
 
         batch_size = images.size(0)
         running_loss += loss.item() * batch_size
@@ -166,38 +323,32 @@ def evaluate(
     return epoch_loss, epoch_acc
 
 
-def resolve_channel_mode(mode: str):
-    """Return (use_extra, use_fft, use_grad, in_channels) for given mode."""
-    if mode == "rgb":
-        return False, False, False, 3
-    if mode == "rgb_fft":
-        return True, True, False, 4
-    if mode == "rgb_grad":
-        return True, False, True, 5
-    # rgb_fft_grad
-    return True, True, True, 6
-
-
 def main():
     args = parse_args()
     set_seed(args.seed)
     ensure_dir(args.save_dir)
+
+    if args.two_branch and args.channel_mode != "rgb_grad":
+        print("Two-branch enabled: forcing channel_mode to rgb_grad for RGB+Sobel.")
+        args.channel_mode = "rgb_grad"
 
     log_path = os.path.join(args.save_dir, "train.log")
     train_root = os.path.join(args.data_dir, "train")
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    train_transform, eval_transform = build_transforms(img_size=args.img_size)
+    train_transform, eval_transform = build_transforms(
+        img_size=args.img_size, use_strong_aug=args.use_strong_aug
+    )
 
     use_extra, use_fft, use_grad, in_channels = resolve_channel_mode(
         args.channel_mode
     )
 
-    # dataset with train/val split
     full_dataset = AIGCDataset(
         root=train_root,
         transform=train_transform,
+        use_strong_aug=args.use_strong_aug,
         use_extra_channels=use_extra,
         use_fft=use_fft,
         use_grad=use_grad,
@@ -208,14 +359,22 @@ def main():
     val_size = int(len(full_dataset) * args.val_ratio)
     train_size = len(full_dataset) - val_size
 
-    train_dataset, val_dataset = random_split(
+    train_dataset, val_subset = random_split(
         full_dataset,
         [train_size, val_size],
         generator=torch.Generator().manual_seed(args.seed),
     )
 
-    # validation uses eval transform but same handcrafted flags
-    val_dataset.dataset.transform = eval_transform
+    val_base_dataset = AIGCDataset(
+        root=train_root,
+        transform=eval_transform,
+        use_extra_channels=use_extra,
+        use_fft=use_fft,
+        use_grad=use_grad,
+        highpass_only=args.fft_highpass_only,
+        low_cut_ratio=args.fft_low_cut_ratio,
+    )
+    val_dataset = torch.utils.data.Subset(val_base_dataset, val_subset.indices)
 
     train_loader = DataLoader(
         train_dataset,
@@ -233,8 +392,17 @@ def main():
         pin_memory=True,
     )
 
-    model = create_model(in_channels=in_channels, num_classes=2)
+    model = build_model(args, num_classes=2, input_channels=in_channels)
     model.to(device)
+
+    print(
+        f"Config: model_size={args.model_size}, two_branch={args.two_branch}, "
+        f"use_label_smoothing={args.use_label_smoothing}, "
+        f"label_smoothing={args.label_smoothing}, use_mixup={args.use_mixup}, "
+        f"mixup_alpha={args.mixup_alpha}, use_strong_aug={args.use_strong_aug}, "
+        f"use_tta={args.use_tta}, ensemble_from='{args.ensemble_from}', "
+        f"channel_mode={args.channel_mode}"
+    )
 
     criterion = nn.CrossEntropyLoss()
     optimizer = AdamW(
@@ -244,7 +412,6 @@ def main():
     )
     scheduler = CosineAnnealingLR(optimizer, T_max=args.epochs)
 
-    # wandb init
     run = None
     if args.use_wandb:
         project = os.getenv("WANDB_PROJECT", "aigc-det")
@@ -276,6 +443,7 @@ def main():
                 criterion,
                 optimizer,
                 device,
+                args,
             )
 
             val_loss, val_acc = evaluate(
@@ -283,6 +451,7 @@ def main():
                 val_loader,
                 criterion,
                 device,
+                args,
             )
 
             scheduler.step()
