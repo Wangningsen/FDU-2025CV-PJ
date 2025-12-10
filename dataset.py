@@ -21,13 +21,13 @@ def compute_handcrafted_channels(
     x: torch.Tensor,
     use_fft: bool = True,
     use_grad: bool = True,
+    highpass_only: bool = False,
+    low_cut_ratio: float = 0.1,
 ) -> torch.Tensor:
     """
-    输入: x, (3, H, W), [0,1]
-    输出: 按配置拼接额外通道:
-      - RGB 必有
-      - use_fft: 加 1 个 FFT 幅度通道
-      - use_grad: 加 2 个梯度通道 Gx, Gy
+    x: (3, H, W), [0,1]
+    返回: RGB + [可选 FFT 高频] + [可选 Sobel Gx, Gy]
+    highpass_only=True 时, 只保留高频, 把频谱中心的一块低频置零
     """
     assert x.ndim == 3 and x.shape[0] == 3
 
@@ -35,26 +35,45 @@ def compute_handcrafted_channels(
     gray = 0.299 * r + 0.587 * g + 0.114 * b  # (H, W)
     gray = gray.unsqueeze(0)  # (1, H, W)
 
-    channels = [x]  # 先放 RGB
+    channels = [x]
 
     if use_fft:
+        # 全局 FFT
         fft = torch.fft.fft2(gray)
         fft_shift = torch.fft.fftshift(fft)
+
+        if highpass_only:
+            # 在频谱中心挖一个低频“洞”
+            _, H, W = fft_shift.shape
+            cy, cx = H // 2, W // 2
+            radius = int(low_cut_ratio * min(H, W))
+
+            y1 = max(cy - radius, 0)
+            y2 = min(cy + radius, H)
+            x1 = max(cx - radius, 0)
+            x2 = min(cx + radius, W)
+
+            fft_shift[:, y1:y2, x1:x2] = 0
+
         mag = torch.abs(fft_shift)
-        mag = torch.log1p(mag)
+        mag = torch.log1p(mag)  # 压动态范围
+
         mag = mag - mag.min()
         if mag.max() > 0:
             mag = mag / mag.max()
+
         channels.append(mag)  # (1, H, W)
 
     if use_grad:
         sobel_x = torch.tensor(
             [[1, 0, -1], [2, 0, -2], [1, 0, -1]],
             dtype=torch.float32,
+            device=gray.device,
         ).view(1, 1, 3, 3)
         sobel_y = torch.tensor(
             [[1, 2, 1], [0, 0, 0], [-1, -2, -1]],
             dtype=torch.float32,
+            device=gray.device,
         ).view(1, 1, 3, 3)
 
         gray_nchw = gray.unsqueeze(0)  # (1, 1, H, W)
@@ -86,6 +105,8 @@ class AIGCDataset(Dataset):
         use_extra_channels: bool = True,
         use_fft: bool = True,
         use_grad: bool = True,
+        highpass_only: bool = True,
+        low_cut_ratio: float = 0.1,
     ):
         super().__init__()
         self.root = root
@@ -93,6 +114,8 @@ class AIGCDataset(Dataset):
         self.use_extra_channels = use_extra_channels
         self.use_fft = use_fft
         self.use_grad = use_grad
+        self.highpass_only = highpass_only
+        self.low_cut_ratio = low_cut_ratio
 
         self.samples: List[Tuple[str, int]] = []
         for sub in ["0_real", "1_fake"]:
@@ -125,6 +148,8 @@ class AIGCDataset(Dataset):
                 img,
                 use_fft=self.use_fft,
                 use_grad=self.use_grad,
+                highpass_only=self.highpass_only,
+                low_cut_ratio=self.low_cut_ratio,
             )
         return img, label
 
@@ -142,6 +167,8 @@ class AIGCTestDataset(Dataset):
         use_extra_channels: bool = True,
         use_fft: bool = True,
         use_grad: bool = True,
+        highpass_only: bool = True,
+        low_cut_ratio: float = 0.1,
     ):
         super().__init__()
         self.root = root
@@ -149,6 +176,8 @@ class AIGCTestDataset(Dataset):
         self.use_extra_channels = use_extra_channels
         self.use_fft = use_fft
         self.use_grad = use_grad
+        self.highpass_only = highpass_only
+        self.low_cut_ratio = low_cut_ratio
 
         files = [
             f
@@ -177,6 +206,8 @@ class AIGCTestDataset(Dataset):
                 img,
                 use_fft=self.use_fft,
                 use_grad=self.use_grad,
+                highpass_only=self.highpass_only,
+                low_cut_ratio=self.low_cut_ratio,
             )
 
         return img, fname
