@@ -91,6 +91,17 @@ def parse_args():
         action="store_true",
         help="Log training to Weights and Biases",
     )
+    parser.add_argument(
+        "--fft_highpass_only",
+        action="store_true",
+        help="Use only high frequency components in FFT channel",
+    )
+    parser.add_argument(
+        "--fft_low_cut_ratio",
+        type=float,
+        default=0.1,
+        help="Low frequency radius ratio to cut when using highpass FFT",
+    )
     return parser.parse_args()
 
 
@@ -190,6 +201,8 @@ def main():
         use_extra_channels=use_extra,
         use_fft=use_fft,
         use_grad=use_grad,
+        highpass_only=args.fft_highpass_only,
+        low_cut_ratio=args.fft_low_cut_ratio,
     )
 
     val_size = int(len(full_dataset) * args.val_ratio)
