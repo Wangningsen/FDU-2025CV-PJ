@@ -91,7 +91,7 @@ parser.add_argument(
     help="Optional: comma-separated list of checkpoint paths to ensemble at inference. "
          "If non-empty, load these models and average their logits."
 )
-````
+```
 
 3. Ensure these new flags are included in any config or logging (e.g. if using wandb, log them in the config dict).
 
