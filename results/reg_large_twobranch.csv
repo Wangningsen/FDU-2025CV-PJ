@@ -1,0 +1,7 @@
+experiment,model_size,two_branch,channel_mode,fft_highpass_only,fft_low_cut_ratio,use_tta,num_samples,threshold,accuracy,precision,recall,f1,tp,tn,fp,fn,pos_rate,val_ratio,seed,checkpoint
+arch_twobranch_large_rgb_grad,large,True,rgb_grad,False,0.1,False,800,0.5,0.9375,0.9635416666666666,0.9113300492610837,0.9367088607594936,370,380,14,36,0.48,0.1,42,./weights/arch_twobranch_large_rgb_grad/best_model.pth
+extra_twobranch_large_lr5e4,large,True,rgb_grad,False,0.1,False,800,0.5,0.94125,0.9711286089238845,0.9113300492610837,0.940279542566709,370,383,11,36,0.47625,0.1,42,./weights/extra_twobranch_large_lr5e4/best_model.pth
+extra_twobranch_large_lr3e4,large,True,rgb_grad,False,0.1,False,800,0.5,0.94875,0.9667519181585678,0.9310344827586207,0.9485570890840653,378,381,13,28,0.48875,0.1,42,./weights/extra_twobranch_large_lr3e4/best_model.pth
+extra_twobranch_large_ls_only,large,True,rgb_grad,False,0.1,False,800,0.5,0.94,0.952020202020202,0.9285714285714286,0.9401496259351622,377,375,19,29,0.495,0.1,42,./weights/extra_twobranch_large_ls_only/best_model.pth
+extra_twobranch_large_strong_ls_lr5e4,large,True,rgb_grad,False,0.1,False,800,0.5,0.82375,0.8388746803069054,0.8078817733990148,0.823086574654956,328,331,63,78,0.48875,0.1,42,./weights/extra_twobranch_large_strong_ls_lr5e4/best_model.pth
+extra_twobranch_large_strong_ls_mixup_lr5e4,large,True,rgb_grad,False,0.1,False,800,0.5,0.80625,0.8009592326139089,0.8226600985221675,0.8116646415552854,334,311,83,72,0.52125,0.1,42,./weights/extra_twobranch_large_strong_ls_mixup_lr5e4/best_model.pth
