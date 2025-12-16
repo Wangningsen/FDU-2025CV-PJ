@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -e
 
-ROOT="/data1/nwang60/datasets/aigcdetectbenchmark"
+ROOT="/data3/nwang60/dataset/aigcdetectbenchmark"
 
 cd "$ROOT"
 
