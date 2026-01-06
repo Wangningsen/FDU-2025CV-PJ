@@ -1,6 +1,7 @@
 # AIGCNet: Lightweight Gradient Aware CNNs for AI Generated Image Detection under Generator Shift
 
 [![Hugging Face](https://img.shields.io/badge/🤗-Hugging%20Face-blue)](https://huggingface.co/2025FDU-CG)
+
 Training log can be found [here](https://wandb.ai/ningsenw-fudan-university/FDU-2025CV-PJ?nw=nwuserningsenw).
 
 ## Overview
