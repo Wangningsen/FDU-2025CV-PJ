@@ -1,6 +1,7 @@
 # AIGCNet: Lightweight Gradient Aware CNNs for AI Generated Image Detection under Generator Shift
 
 [![Hugging Face](https://img.shields.io/badge/🤗-Hugging%20Face-blue)](https://huggingface.co/2025FDU-CG)
+Training log can be found [here](https://wandb.ai/ningsenw-fudan-university/FDU-2025CV-PJ?nw=nwuserningsenw).
 
 ## Overview
 We tackle binary classification of real vs AI generated images under the course rules of training from scratch: no pretrained weights and no external data beyond the provided dataset. The method builds ultra lightweight residual CNNs (AIGCNetSmall and AIGCNetLarge) in both single-branch and two-branch forms. Inputs can include RGB, Sobel gradients, and optional FFT magnitude channels. Models are trained on a train/val split carved from the course training set, and evaluated both in-domain and under distribution shift on the AIGCDetectBenchmark.
